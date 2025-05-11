@@ -102,6 +102,10 @@ class DownloadHandler(FileSystemEventHandler):
 
 def monitor_directory(api_url, monitor_path):
     global observer
+    # Validar que monitor_path no sea /app
+    if monitor_path == '/app':
+        raise ValueError("No se puede monitorear el directorio raíz /app")
+    # Crear directorio si no existe
     if not os.path.exists(monitor_path):
         os.makedirs(monitor_path)
         print(f"Directorio {monitor_path} creado")
@@ -131,9 +135,11 @@ def start_monitor():
     if not monitor_path:
         return jsonify({'error': 'El parámetro monitor_path es obligatorio'}), 400
     try:
-        # Validar que monitor_path sea una ruta válida
+        # Validar que monitor_path sea una ruta absoluta y no sea /app
         if not os.path.isabs(monitor_path):
             return jsonify({'error': 'monitor_path debe ser una ruta absoluta'}), 400
+        if monitor_path == '/app':
+            return jsonify({'error': 'No se puede monitorear el directorio raíz /app'}), 400
         thread = Thread(target=monitor_directory, args=(api_url, monitor_path))
         thread.start()
         return jsonify({'message': f'Monitoreo iniciado en {monitor_path}'}), 200
@@ -165,4 +171,3 @@ if __name__ == "__main__":
 
     # Para pruebas locales, ejecuta Flask
     app.run(host='0.0.0.0', port=5000, debug=True)
-    
