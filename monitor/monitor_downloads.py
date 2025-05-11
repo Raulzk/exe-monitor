@@ -3,14 +3,23 @@ import time
 import base64
 import requests
 import argparse
+import getpass
+import psycopg2
+from psycopg2 import sql
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 from threading import Thread, Event
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": ["https://exe-monitor-frontend.onrender.com", "http://localhost:4200"]}})
+
+# Configuración de la base de datos (reemplaza con tu URL)
+DB_URL = "postgres://user:password@host:port/db"
 
 # Variable global para controlar el observador
 observer = None
@@ -93,12 +102,27 @@ class DownloadHandler(FileSystemEventHandler):
                     print(f"Predicción para {os.path.basename(file_path)}: {prediction}")
                     with open('predictions.log', 'a') as log_file:
                         log_file.write(f"{time.ctime()}: {os.path.basename(file_path)} -> Predicción: {prediction}\n")
+                    save_prediction(os.path.basename(file_path), prediction)
                 else:
                     print(f"Error en la predicción: {predict_response.status_code} - {predict_response.text}")
             else:
                 print(f"Error al extraer características: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"Error al procesar {file_path}: {str(e)}")
+
+def save_prediction(filename, prediction):
+    try:
+        conn = psycopg2.connect(DB_URL)
+        cursor = conn.cursor()
+        cursor.execute(
+            sql.SQL("INSERT INTO predictions (filename, prediction, timestamp) VALUES (%s, %s, %s)"),
+            [filename, prediction, time.ctime()]
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"Error al guardar predicción: {str(e)}")
 
 def monitor_directory(api_url, monitor_path):
     global observer
@@ -163,11 +187,41 @@ def status():
     global observer
     return jsonify({'monitoring': observer is not None and observer.is_alive()}), 200
 
+@app.route('/predictions', methods=['GET'])
+def get_predictions():
+    try:
+        conn = psycopg2.connect(DB_URL)
+        cursor = conn.cursor()
+        cursor.execute("SELECT filename, prediction, timestamp FROM predictions ORDER BY id DESC LIMIT 50")
+        predictions = [{"filename": row[0], "prediction": row[1], "timestamp": row[2]} for row in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+        return jsonify(predictions), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/upload_exe', methods=['POST'])
+def upload_exe():
+    try:
+        file = request.files['file']
+        monitor_path = request.form.get('monitor_path')
+        if not file or not monitor_path:
+            return jsonify({'error': 'Archivo y monitor_path son obligatorios'}), 400
+        if not file.filename.endswith('.exe'):
+            return jsonify({'error': 'Solo se permiten archivos .exe'}), 400
+        if not os.path.exists(monitor_path):
+            os.makedirs(monitor_path)
+        filename = secure_filename(file.filename)
+        file.save(os.path.join(monitor_path, filename))
+        return jsonify({'message': f'Archivo {filename} subido a {monitor_path}'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Monitorea un directorio para .exe y predice usando una API.")
-    parser.add_argument('--path', type=str, default="C:\\Users\\wwwab\\Downloads", help="Ruta del directorio a monitorear")
+    parser.add_argument('--path', type=str, default=f"C:\\Users\\{getpass.getuser()}\\Desktop", help="Ruta del directorio a monitorear")
     parser.add_argument('--api-url', type=str, default="https://api-proyecto-w9dn.onrender.com", help="URL de la API")
     args = parser.parse_args()
 
-    # Para pruebas locales, ejecuta Flask
     app.run(host='0.0.0.0', port=5000, debug=True)
+    
