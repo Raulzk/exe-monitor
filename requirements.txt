@@ -1,0 +1,8 @@
+Flask==2.3.3
+flask-cors==4.0.1
+joblib==1.4.2
+pefile==2023.2.7
+gunicorn==22.0.0
+scikit-learn==1.5.2
+watchdog==5.0.3
+requests==2.32.3
